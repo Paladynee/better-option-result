@@ -424,6 +424,7 @@ impl<T, E> BetterResult<T, E> {
 }
 
 // core aliases
+#[cfg(feature = "aliases")]
 impl<T, E> BetterResult<T, E> {
     /// stable alias for `unwrap_or_lazy`
     pub fn unwrap_or_else<F>(self, default_fn: F) -> T
@@ -564,6 +565,7 @@ impl<T, E> BetterResult<&T, E> {
 }
 
 // core aliases
+#[cfg(feature = "aliases")]
 impl<T, E> BetterResult<&T, E> {
     /// stable alias for `into_copied`
     pub fn copied(self) -> BetterResult<T, E>
@@ -583,7 +585,7 @@ impl<T, E> BetterResult<&T, E> {
 }
 
 impl<T, E> BetterResult<&mut T, E> {
-    pub fn copied(self) -> BetterResult<T, E>
+    pub fn into_copied(self) -> BetterResult<T, E>
     where
         T: Copy,
     {
@@ -593,7 +595,7 @@ impl<T, E> BetterResult<&mut T, E> {
         }
     }
 
-    pub fn cloned(self) -> BetterResult<T, E>
+    pub fn into_cloned(self) -> BetterResult<T, E>
     where
         T: Clone,
     {
@@ -601,8 +603,28 @@ impl<T, E> BetterResult<&mut T, E> {
     }
 }
 
+#[cfg(feature = "aliases")]
+// core aliases
+impl<T, E> BetterResult<&mut T, E> {
+    /// stable alias for `into_copied`
+    pub fn copied(self) -> BetterResult<T, E>
+    where
+        T: Copy,
+    {
+        self.into_copied()
+    }
+
+    /// stable alias for `into_cloned`
+    pub fn cloned(self) -> BetterResult<T, E>
+    where
+        T: Clone,
+    {
+        self.into_cloned()
+    }
+}
+
 impl<T, E> BetterResult<BetterOption<T>, E> {
-    pub fn transpose(self) -> BetterOption<BetterResult<T, E>> {
+    pub fn into_option_transposed(self) -> BetterOption<BetterResult<T, E>> {
         match self {
             Ok(Some(x)) => Some(Ok(x)),
             Ok(None) => None,
@@ -611,13 +633,31 @@ impl<T, E> BetterResult<BetterOption<T>, E> {
     }
 }
 
+#[cfg(feature = "aliases")]
+// core aliases
+impl<T, E> BetterResult<BetterOption<T>, E> {
+    /// stable alias for `into_option_transposed`
+    pub fn transposed(self) -> BetterOption<BetterResult<T, E>> {
+        self.into_option_transposed()
+    }
+}
+
 impl<T, E> BetterResult<BetterResult<T, E>, E> {
-    pub fn flatten(self) -> BetterResult<T, E> {
+    pub fn into_flattened(self) -> BetterResult<T, E> {
         // FIXME(const-hack): could be written with `and_then`
         match self {
             Ok(inner) => inner,
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(feature = "aliases")]
+// core aliases
+impl<T, E> BetterResult<BetterResult<T, E>, E> {
+    /// stable alias for `into_flattened`
+    pub fn flattened(self) -> BetterResult<T, E> {
+        self.into_flattened()
     }
 }
 

@@ -469,6 +469,7 @@ impl<T> BetterOption<T> {
 }
 
 // core aliases
+#[cfg(feature = "aliases")]
 impl<T> BetterOption<T> {
     /// stable alias for `into_is_some_and`
     pub fn is_some_and<F>(self, f: F) -> bool
@@ -626,6 +627,7 @@ impl<T> BetterOption<T> {
 }
 
 // core aliases
+#[cfg(feature = "aliases")]
 impl<T, U> BetterOption<(T, U)> {
     /// stable alias for `into_unzipped`
     pub fn unzip(self) -> (BetterOption<T>, BetterOption<U>) {
@@ -634,6 +636,7 @@ impl<T, U> BetterOption<(T, U)> {
 }
 
 // core aliases
+#[cfg(feature = "aliases")]
 impl<T> BetterOption<&T> {
     /// stable alias for `into_copied`
     pub const fn copied(self) -> BetterOption<T>
@@ -695,7 +698,7 @@ impl<T> BetterOption<&T> {
 }
 
 impl<T> BetterOption<&mut T> {
-    pub const fn copied(self) -> BetterOption<T>
+    pub const fn into_copied(self) -> BetterOption<T>
     where
         T: Copy,
     {
@@ -705,7 +708,7 @@ impl<T> BetterOption<&mut T> {
         }
     }
 
-    pub fn cloned(self) -> BetterOption<T>
+    pub fn into_cloned(self) -> BetterOption<T>
     where
         T: Clone,
     {
@@ -713,6 +716,26 @@ impl<T> BetterOption<&mut T> {
             Some(t) => Some(t.clone()),
             None => None,
         }
+    }
+}
+
+// core aliases
+#[cfg(feature = "aliases")]
+impl<T> BetterOption<&mut T> {
+    /// stable alias for `into_copied`
+    pub const fn copied(self) -> BetterOption<T>
+    where
+        T: Copy,
+    {
+       self.into_copied()
+    }
+
+    /// stable alias for `into_cloned`
+    pub fn cloned(self) -> BetterOption<T>
+    where
+        T: Clone,
+    {
+        self.into_cloned()
     }
 }
 
@@ -727,6 +750,7 @@ impl<T, E> BetterOption<BetterResult<T, E>> {
 }
 
 // core aliases
+#[cfg(feature = "aliases")]
 impl<T, E> BetterOption<BetterResult<T, E>> {
     /// stable alias for `into_result_transposed`
     pub fn transpose(self) -> BetterResult<BetterOption<T>, E> {
