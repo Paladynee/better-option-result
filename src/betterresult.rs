@@ -264,7 +264,7 @@ impl<T, E> BetterResult<T, E> {
         }
     }
 
-    pub fn into_map<U, F>(self, map: F) -> BetterResult<U, E>
+    pub fn into_mapped<U, F>(self, map: F) -> BetterResult<U, E>
     where
         F: FnOnce(T) -> U,
     {
@@ -274,7 +274,7 @@ impl<T, E> BetterResult<T, E> {
         }
     }
 
-    pub fn into_map_or<U, F>(self, default: U, map: F) -> U
+    pub fn into_mapped_or<U, F>(self, default: U, map: F) -> U
     where
         F: FnOnce(T) -> U,
     {
@@ -284,7 +284,7 @@ impl<T, E> BetterResult<T, E> {
         }
     }
 
-    pub fn into_map_or_lazy<U, D, F>(self, default_fn: D, map: F) -> U
+    pub fn into_mapped_or_lazy<U, D, F>(self, default_fn: D, map: F) -> U
     where
         D: FnOnce(E) -> U,
         F: FnOnce(T) -> U,
@@ -295,7 +295,7 @@ impl<T, E> BetterResult<T, E> {
         }
     }
 
-    pub fn into_map_or_default<F, U>(self, map: F) -> U
+    pub fn into_mapped_or_default<F, U>(self, map: F) -> U
     where
         F: FnOnce(T) -> U,
         U: Default,
@@ -306,7 +306,7 @@ impl<T, E> BetterResult<T, E> {
         }
     }
 
-    pub fn into_map_err<F, O>(self, map_err: O) -> BetterResult<T, F>
+    pub fn into_mapped_err<F, O>(self, map_err: O) -> BetterResult<T, F>
     where
         O: FnOnce(E) -> F,
     {
@@ -316,7 +316,7 @@ impl<T, E> BetterResult<T, E> {
         }
     }
 
-    pub fn into_map_err_or<F, O>(self, default: BetterResult<T, F>, map_err: O) -> BetterResult<T, F>
+    pub fn into_mapped_err_or<F, O>(self, default: BetterResult<T, F>, map_err: O) -> BetterResult<T, F>
     where
         O: FnOnce(E) -> F,
     {
@@ -370,14 +370,14 @@ impl<T, E> BetterResult<T, E> {
     where
         T: Deref,
     {
-        self.as_ref().into_map(|t| t.deref())
+        self.as_ref().into_mapped(|t| t.deref())
     }
 
     pub fn as_deref_mut(&mut self) -> BetterResult<&mut T::Target, &mut E>
     where
         T: DerefMut,
     {
-        self.as_mut().into_map(|t| t.deref_mut())
+        self.as_mut().into_mapped(|t| t.deref_mut())
     }
 
     // todo: iter methods
@@ -448,7 +448,7 @@ impl<T, E> BetterResult<&T, E> {
     where
         T: Clone,
     {
-        self.into_map(|t| t.clone())
+        self.into_mapped(|t| t.clone())
     }
 }
 
@@ -467,7 +467,7 @@ impl<T, E> BetterResult<&mut T, E> {
     where
         T: Clone,
     {
-        self.into_map(|t| t.clone())
+        self.into_mapped(|t| t.clone())
     }
 }
 

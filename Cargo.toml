@@ -5,7 +5,7 @@ keywords = ["option", "result"]
 license-file = "LICENSE"
 name = "better_option_result"
 repository = "https://github.com/Paladynee/better-option-result"
-version = "0.1.0"
+version = "0.2.0"
 
 [dependencies]
 

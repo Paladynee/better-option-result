@@ -241,7 +241,7 @@ impl<T> BetterOption<T> {
         unsafe { slice::from_raw_parts_mut((self as *mut Self).byte_add(core::mem::offset_of!(Self, Some.0)).cast(), self.len()) }
     }
 
-    pub fn into_map<F, U>(self, map: F) -> BetterOption<U>
+    pub fn into_mapped<F, U>(self, map: F) -> BetterOption<U>
     where
         F: FnOnce(T) -> U,
     {
@@ -251,7 +251,7 @@ impl<T> BetterOption<T> {
         }
     }
 
-    pub fn into_map_or<U, F>(self, default: U, map: F) -> U
+    pub fn into_mapped_or<U, F>(self, default: U, map: F) -> U
     where
         F: FnOnce(T) -> U,
     {
@@ -261,7 +261,7 @@ impl<T> BetterOption<T> {
         }
     }
 
-    pub fn into_map_or_lazy<U, D, F>(self, default_fn: D, map: F) -> U
+    pub fn into_mapped_or_lazy<U, D, F>(self, default_fn: D, map: F) -> U
     where
         F: FnOnce(T) -> U,
         D: FnOnce() -> U,
@@ -272,7 +272,7 @@ impl<T> BetterOption<T> {
         }
     }
 
-    pub fn into_map_or_default<U, F>(self, map: F) -> U
+    pub fn into_mapped_or_default<U, F>(self, map: F) -> U
     where
         F: FnOnce(T) -> U,
         U: Default,
@@ -314,14 +314,14 @@ impl<T> BetterOption<T> {
     where
         T: Deref,
     {
-        self.as_ref().into_map(|t| t.deref())
+        self.as_ref().into_mapped(|t| t.deref())
     }
 
     pub fn as_deref_mut(&mut self) -> BetterOption<&mut T::Target>
     where
         T: DerefMut,
     {
-        self.as_mut().into_map(|t| t.deref_mut())
+        self.as_mut().into_mapped(|t| t.deref_mut())
     }
 
     // todo: iter methods
@@ -343,7 +343,7 @@ impl<T> BetterOption<T> {
         }
     }
 
-    pub fn filter<P>(self, predicate: P) -> Self
+    pub fn into_filtered<P>(self, predicate: P) -> Self
     where
         P: FnOnce(&T) -> bool,
     {
@@ -380,8 +380,11 @@ impl<T> BetterOption<T> {
         }
     }
 
-    // this doesnt make sense, it cant be lazy.
-    // but we provide the function anyway, for API completion sake
+    /// this doesnt make sense, it cant be lazy. the output of
+    /// xor depends on both of its inputs, therefore it cant be
+    /// used as a form of control flow.
+    /// 
+    /// but we provide the function anyway, for API completion sake
     pub fn into_xor_lazy<F>(self, f: F) -> BetterOption<T>
     where
         F: FnOnce() -> BetterOption<T>,
@@ -433,7 +436,7 @@ impl<T> BetterOption<T> {
     where
         P: FnOnce(&mut T) -> bool,
     {
-        if self.as_mut().into_map_or(false, predicate) {
+        if self.as_mut().into_mapped_or(false, predicate) {
             self.take()
         } else {
             None
