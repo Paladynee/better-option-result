@@ -545,6 +545,15 @@ impl<T, E> From<result::Result<T, E>> for BetterResult<T, E> {
     }
 }
 
+impl<T, E> From<BetterResult<T, E>> for result::Result<T, E> {
+    fn from(value: BetterResult<T, E>) -> Self {
+        match value {
+            Ok(t) => result::Result::Ok(t),
+            Err(e) => result::Result::Err(e),
+        }
+    }
+}
+
 impl<T, E> BetterResult<&T, E> {
     pub fn into_copied(self) -> BetterResult<T, E>
     where

@@ -664,6 +664,15 @@ impl<T> From<option::Option<T>> for BetterOption<T> {
     }
 }
 
+impl<T> From<BetterOption<T>> for option::Option<T> {
+    fn from(value: BetterOption<T>) -> Self {
+        match value {
+            Some(t) => option::Option::Some(t),
+            None => option::Option::None,
+        }
+    }
+}
+
 impl<T, U> BetterOption<(T, U)> {
     pub fn into_unzipped(self) -> (BetterOption<T>, BetterOption<U>) {
         match self {
@@ -727,7 +736,7 @@ impl<T> BetterOption<&mut T> {
     where
         T: Copy,
     {
-       self.into_copied()
+        self.into_copied()
     }
 
     /// stable alias for `into_cloned`
