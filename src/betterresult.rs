@@ -104,6 +104,14 @@ impl<T, E> BetterResult<T, E> {
         !self.is_ok()
     }
 
+    pub const fn is_err(&self) -> bool {
+        !self.is_ok()
+    }
+
+    pub const fn is_not_err(&self) -> bool {
+        self.is_ok()
+    }
+
     pub fn into_is_ok_and<F>(self, map: F) -> bool
     where
         F: FnOnce(T) -> bool,
@@ -164,14 +172,6 @@ impl<T, E> BetterResult<T, E> {
             Ok(val) => map(val),
             Err(x) => !map_err(x),
         }
-    }
-
-    pub const fn is_err(&self) -> bool {
-        !self.is_ok()
-    }
-
-    pub const fn is_not_err(&self) -> bool {
-        self.is_ok()
     }
 
     pub fn into_is_err_and<F>(self, map_err: F) -> bool
@@ -382,31 +382,30 @@ impl<T, E> BetterResult<T, E> {
 
     // todo: iter methods
 
-    pub fn into_arg_if_ok(self, arg: BetterResult<T, E>) -> BetterResult<T, E> {
+    pub fn into_ok_of_arg<U>(self, arg: BetterResult<U, E>) -> BetterResult<U, E> {
         match self {
             Ok(_) => arg,
             Err(e) => Err(e),
         }
     }
 
-    pub fn into_arg_if_ok_lazy<F>(self, arg_fn: F) -> BetterResult<T, E>
+    pub fn into_ok_of_arg_lazy<U, F>(self, arg_fn: F) -> BetterResult<U, E>
     where
-        F: FnOnce(T) -> BetterResult<T, E>,
+        F: FnOnce(T) -> BetterResult<U, E>,
     {
         match self {
             Ok(t) => arg_fn(t),
             Err(e) => Err(e),
         }
     }
-
-    pub fn into_arg_if_err<F>(self, arg: BetterResult<T, F>) -> BetterResult<T, F> {
+    pub fn into_err_of_arg<F>(self, arg: BetterResult<T, F>) -> BetterResult<T, F> {
         match self {
             Ok(t) => Ok(t),
             Err(_) => arg,
         }
     }
 
-    pub fn into_arg_if_err_lazy<F, G>(self, arg_fn: G) -> BetterResult<T, F>
+    pub fn into_err_of_arg_lazy<F, G>(self, arg_fn: G) -> BetterResult<T, F>
     where
         G: FnOnce(E) -> BetterResult<T, F>,
     {
@@ -424,6 +423,118 @@ impl<T, E> BetterResult<T, E> {
     }
 }
 
+// core aliases
+impl<T, E> BetterResult<T, E> {
+    /// stable alias for `unwrap_or_lazy`
+    pub fn unwrap_or_else<F>(self, default_fn: F) -> T
+    where
+        F: FnOnce(E) -> T,
+    {
+        self.unwrap_or_lazy(default_fn)
+    }
+
+    /// stable alias for `into_is_ok_and`
+    pub fn is_ok_and<F>(self, map: F) -> bool
+    where
+        F: FnOnce(T) -> bool,
+    {
+        self.into_is_ok_and(map)
+    }
+
+    /// stable alias for `into_is_err_and`
+    pub fn is_err_and<F>(self, map_err: F) -> bool
+    where
+        F: FnOnce(E) -> bool,
+    {
+        self.into_is_err_and(map_err)
+    }
+
+    /// stable alias for `into_option`
+    pub fn ok(self) -> BetterOption<T> {
+        self.into_option()
+    }
+
+    /// stable alias for `into_option_err`
+    pub fn err(self) -> BetterOption<E> {
+        self.into_option_err()
+    }
+
+    /// stable alias for `into_mapped`
+    pub fn map<U, F>(self, map: F) -> BetterResult<U, E>
+    where
+        F: FnOnce(T) -> U,
+    {
+        self.into_mapped(map)
+    }
+
+    /// stable alias for `into_mapped_or`
+    pub fn map_or<U, F>(self, default: U, map: F) -> U
+    where
+        F: FnOnce(T) -> U,
+    {
+        self.into_mapped_or(default, map)
+    }
+
+    /// stable alias for `into_mapped_or_lazy`
+    pub fn map_or_else<U, D, F>(self, default_fn: D, map: F) -> U
+    where
+        D: FnOnce(E) -> U,
+        F: FnOnce(T) -> U,
+    {
+        self.into_mapped_or_lazy(default_fn, map)
+    }
+
+    /// stable alias for `into_mapped_err`
+    pub fn map_err<F, O>(self, map_err: O) -> BetterResult<T, F>
+    where
+        O: FnOnce(E) -> F,
+    {
+        self.into_mapped_err(map_err)
+    }
+
+    /// stable alias for `into_self_inspect`
+    pub fn inspect<F>(self, inspect: F) -> Self
+    where
+        F: FnOnce(&T),
+    {
+        self.into_self_inspect(inspect)
+    }
+
+    /// stable alias for `into_self_inspect_err`
+    pub fn inspect_err<F>(self, inspect: F) -> Self
+    where
+        F: FnOnce(&E),
+    {
+        self.into_self_inspect_err(inspect)
+    }
+
+    /// stable alias for `into_arg_if_ok`
+    pub fn and<U>(self, arg: BetterResult<U, E>) -> BetterResult<U, E> {
+        self.into_ok_of_arg(arg)
+    }
+
+    /// stable alias for `into_arg_if_ok_lazy`
+    pub fn and_then<U, F>(self, arg_fn: F) -> BetterResult<U, E>
+    where
+        F: FnOnce(T) -> BetterResult<U, E>,
+    {
+        self.into_ok_of_arg_lazy(arg_fn)
+    }
+
+    /// stable alias for `into_err_of_arg`
+    pub fn or<F>(self, arg: BetterResult<T, F>) -> BetterResult<T, F> {
+        self.into_err_of_arg(arg)
+    }
+
+    /// stable alias for `into_err_of_arg_lazy`
+    pub fn or_else<F, O>(self, arg_fn: O) -> BetterResult<T, F>
+    where
+        O: FnOnce(E) -> BetterResult<T, F>,
+    {
+        self.into_err_of_arg_lazy(arg_fn)
+    }
+}
+
 impl<T, E> From<result::Result<T, E>> for BetterResult<T, E> {
     fn from(value: result::Result<T, E>) -> Self {
         match value {
@@ -434,7 +545,7 @@ impl<T, E> From<result::Result<T, E>> for BetterResult<T, E> {
 }
 
 impl<T, E> BetterResult<&T, E> {
-    pub fn copied(self) -> BetterResult<T, E>
+    pub fn into_copied(self) -> BetterResult<T, E>
     where
         T: Copy,
     {
@@ -444,11 +555,30 @@ impl<T, E> BetterResult<&T, E> {
         }
     }
 
-    pub fn cloned(self) -> BetterResult<T, E>
+    pub fn into_cloned(self) -> BetterResult<T, E>
     where
         T: Clone,
     {
         self.into_mapped(|t| t.clone())
+    }
+}
+
+// core aliases
+impl<T, E> BetterResult<&T, E> {
+    /// stable alias for `into_copied`
+    pub fn copied(self) -> BetterResult<T, E>
+    where
+        T: Copy,
+    {
+        self.into_copied()
+    }
+
+    /// stable alias for `into_cloned`
+    pub fn cloned(self) -> BetterResult<T, E>
+    where
+        T: Clone,
+    {
+        self.into_cloned()
     }
 }
 

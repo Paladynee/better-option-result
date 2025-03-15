@@ -169,6 +169,18 @@ impl<T> BetterOption<T> {
         }
     }
 
+    pub fn into_is_none_or<F>(self, map: F) -> bool
+    where
+        F: FnOnce(T) -> bool,
+    {
+        match self {
+            Some(x) => map(x),
+            None => true,
+        }
+    }
+
+    // todo: into_is_none_* all gates impl
+
     pub const fn as_ref(&self) -> BetterOption<&T> {
         match *self {
             Some(ref t) => Some(t),
@@ -241,7 +253,7 @@ impl<T> BetterOption<T> {
         unsafe { slice::from_raw_parts_mut((self as *mut Self).byte_add(core::mem::offset_of!(Self, Some.0)).cast(), self.len()) }
     }
 
-    pub fn into_mapped<F, U>(self, map: F) -> BetterOption<U>
+    pub fn into_mapped<U, F>(self, map: F) -> BetterOption<U>
     where
         F: FnOnce(T) -> U,
     {
@@ -263,8 +275,8 @@ impl<T> BetterOption<T> {
 
     pub fn into_mapped_or_lazy<U, D, F>(self, default_fn: D, map: F) -> U
     where
-        F: FnOnce(T) -> U,
         D: FnOnce() -> U,
+        F: FnOnce(T) -> U,
     {
         match self {
             Some(t) => map(t),
@@ -290,7 +302,7 @@ impl<T> BetterOption<T> {
         }
     }
 
-    pub fn into_result_lazy<F, E>(self, f: F) -> BetterResult<T, E>
+    pub fn into_result_lazy<E, F>(self, f: F) -> BetterResult<T, E>
     where
         F: FnOnce() -> E,
     {
@@ -326,14 +338,14 @@ impl<T> BetterOption<T> {
 
     // todo: iter methods
 
-    pub fn into_and<U>(self, optb: BetterOption<U>) -> BetterOption<U> {
+    pub fn into_arg<U>(self, optb: BetterOption<U>) -> BetterOption<U> {
         match self {
             Some(_) => optb,
             None => None,
         }
     }
 
-    pub fn into_and_lazy<U, F>(self, f: F) -> BetterOption<U>
+    pub fn into_arg_lazy<U, F>(self, f: F) -> BetterOption<U>
     where
         F: FnOnce(T) -> BetterOption<U>,
     {
@@ -355,14 +367,14 @@ impl<T> BetterOption<T> {
         None
     }
 
-    pub fn into_or(self, optb: BetterOption<T>) -> BetterOption<T> {
+    pub fn into_arg_if_none(self, optb: BetterOption<T>) -> BetterOption<T> {
         match self {
             x @ Some(_) => x,
             None => optb,
         }
     }
 
-    pub fn into_or_else<F>(self, f: F) -> BetterOption<T>
+    pub fn into_arg_if_none_lazy<F>(self, f: F) -> BetterOption<T>
     where
         F: FnOnce() -> BetterOption<T>,
     {
@@ -372,7 +384,7 @@ impl<T> BetterOption<T> {
         }
     }
 
-    pub fn into_xor(self, optb: BetterOption<T>) -> BetterOption<T> {
+    pub fn into_arg_xor(self, optb: BetterOption<T>) -> BetterOption<T> {
         match (self, optb) {
             (a @ Some(_), None) => a,
             (None, b @ Some(_)) => b,
@@ -380,41 +392,25 @@ impl<T> BetterOption<T> {
         }
     }
 
-    /// this doesnt make sense, it cant be lazy. the output of
-    /// xor depends on both of its inputs, therefore it cant be
-    /// used as a form of control flow.
-    /// 
-    /// but we provide the function anyway, for API completion sake
-    pub fn into_xor_lazy<F>(self, f: F) -> BetterOption<T>
-    where
-        F: FnOnce() -> BetterOption<T>,
-    {
-        match (self, f()) {
-            (a @ Some(_), None) => a,
-            (None, b @ Some(_)) => b,
-            _ => None,
-        }
-    }
-
-    pub fn insert(&mut self, value: T) -> &mut T {
+    pub fn as_mut_insert(&mut self, value: T) -> &mut T {
         *self = Some(value);
 
         // SAFETY: the code above just filled the option
         unsafe { self.as_mut().unwrap_unchecked() }
     }
 
-    pub fn get_or_insert(&mut self, value: T) -> &mut T {
-        self.get_or_insert_with(|| value)
+    pub fn as_mut_get_or_insert(&mut self, value: T) -> &mut T {
+        self.as_mut_get_or_insert_lazy(|| value)
     }
 
-    pub fn get_or_insert_default(&mut self) -> &mut T
+    pub fn as_mut_get_or_insert_default(&mut self) -> &mut T
     where
         T: Default,
     {
-        self.get_or_insert_with(T::default)
+        self.as_mut_get_or_insert_lazy(T::default)
     }
 
-    pub fn get_or_insert_with<F>(&mut self, f: F) -> &mut T
+    pub fn as_mut_get_or_insert_lazy<F>(&mut self, f: F) -> &mut T
     where
         F: FnOnce() -> T,
     {
@@ -427,34 +423,34 @@ impl<T> BetterOption<T> {
         unsafe { self.as_mut().unwrap_unchecked() }
     }
 
-    pub const fn take(&mut self) -> BetterOption<T> {
+    pub const fn as_mut_take(&mut self) -> BetterOption<T> {
         // FIXME(const-hack) replace `mem::replace` by `mem::take` when the latter is const ready
         mem::replace(self, None)
     }
 
-    pub fn take_if<P>(&mut self, predicate: P) -> BetterOption<T>
+    pub fn as_mut_take_if<P>(&mut self, predicate: P) -> BetterOption<T>
     where
         P: FnOnce(&mut T) -> bool,
     {
         if self.as_mut().into_mapped_or(false, predicate) {
-            self.take()
+            self.as_mut_take()
         } else {
             None
         }
     }
 
-    pub const fn replace(&mut self, value: T) -> BetterOption<T> {
+    pub const fn as_mut_replace(&mut self, value: T) -> BetterOption<T> {
         mem::replace(self, Some(value))
     }
 
-    pub fn into_zip<U>(self, other: BetterOption<U>) -> BetterOption<(T, U)> {
+    pub fn into_zipped<U>(self, other: BetterOption<U>) -> BetterOption<(T, U)> {
         match (self, other) {
             (Some(a), Some(b)) => Some((a, b)),
             _ => None,
         }
     }
 
-    pub fn into_zip_with<U, F, R>(self, other: BetterOption<U>, f: F) -> BetterOption<R>
+    pub fn into_zipped_lazy<U, F, R>(self, other: BetterOption<U>, f: F) -> BetterOption<R>
     where
         F: FnOnce(T, U) -> R,
     {
@@ -472,6 +468,190 @@ impl<T> BetterOption<T> {
     }
 }
 
+// core aliases
+impl<T> BetterOption<T> {
+    /// stable alias for `into_is_some_and`
+    pub fn is_some_and<F>(self, f: F) -> bool
+    where
+        F: FnOnce(T) -> bool,
+    {
+        self.into_is_some_and(f)
+    }
+
+    /// stable alias for `into_is_none_or`
+    pub fn is_none_or<F>(self, map: F) -> bool
+    where
+        F: FnOnce(T) -> bool,
+    {
+        self.into_is_none_or(map)
+    }
+
+    /// stable alias for `into_mapped`
+    pub fn map<U, F>(self, map: F) -> BetterOption<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        self.into_mapped(map)
+    }
+
+    /// stable alias for `into_mapped_or`
+    pub fn map_or<U, F>(self, default: U, map: F) -> U
+    where
+        F: FnOnce(T) -> U,
+    {
+        self.into_mapped_or(default, map)
+    }
+
+    /// stable alias for `into_mapped_or_lazy`
+    pub fn map_or_else<U, D, F>(self, default_fn: D, map: F) -> U
+    where
+        D: FnOnce() -> U,
+        F: FnOnce(T) -> U,
+    {
+        match self {
+            Some(t) => map(t),
+            None => default_fn(),
+        }
+    }
+
+    /// stable alias for `into_result`
+    pub fn ok_or<E>(self, e: E) -> BetterResult<T, E> {
+        self.into_result(e)
+    }
+
+    /// stable alias for `into_result_lazy`
+    pub fn ok_or_else<F, E>(self, f: F) -> BetterResult<T, E>
+    where
+        F: FnOnce() -> E,
+    {
+        self.into_result_lazy(f)
+    }
+
+    /// stable alias for `into_arg`
+    pub fn and<U>(self, optb: BetterOption<U>) -> BetterOption<U> {
+        self.into_arg(optb)
+    }
+
+    /// stable alias for `into_arg_lazy`
+    pub fn and_then<U, F>(self, f: F) -> BetterOption<U>
+    where
+        F: FnOnce(T) -> BetterOption<U>,
+    {
+        self.into_arg_lazy(f)
+    }
+
+    /// stable alias for `into_filtered`
+    pub fn filter<P>(self, predicate: P) -> Self
+    where
+        P: FnOnce(&T) -> bool,
+    {
+        self.into_filtered(predicate)
+    }
+
+    /// stable alias for `into_arg_if_none`
+    pub fn or(self, optb: BetterOption<T>) -> BetterOption<T> {
+        self.into_arg_if_none(optb)
+    }
+
+    /// stable alias for `into_arg_if_none_lazy`
+    pub fn or_else<F>(self, f: F) -> BetterOption<T>
+    where
+        F: FnOnce() -> BetterOption<T>,
+    {
+        self.into_arg_if_none_lazy(f)
+    }
+
+    /// stable alias for `into_arg_xor`
+    pub fn xor(self, optb: BetterOption<T>) -> BetterOption<T> {
+        self.into_arg_xor(optb)
+    }
+
+    /// stable alias for `as_mut_insert`
+    pub fn insert(&mut self, value: T) -> &mut T {
+        self.as_mut_insert(value)
+    }
+
+    /// stable alias for `as_mut_get_or_insert`
+    pub fn get_or_insert(&mut self, value: T) -> &mut T {
+        self.as_mut_get_or_insert(value)
+    }
+
+    /// stable alias for `as_mut_get_or_insert_default`
+    pub fn get_or_insert_default(&mut self) -> &mut T
+    where
+        T: Default,
+    {
+        self.as_mut_get_or_insert_default()
+    }
+
+    /// stable alias for `as_mut_get_or_insert_lazy`
+    pub fn get_or_insert_with<F>(&mut self, f: F) -> &mut T
+    where
+        F: FnOnce() -> T,
+    {
+        self.as_mut_get_or_insert_lazy(f)
+    }
+
+    /// stable alias for `as_mut_take`
+    pub const fn take(&mut self) -> BetterOption<T> {
+        // FIXME(const-hack) replace `mem::replace` by `mem::take` when the latter is const ready
+        mem::replace(self, None)
+    }
+
+    /// stable alias for `as_mut_take_if`
+    pub fn take_if<P>(&mut self, predicate: P) -> BetterOption<T>
+    where
+        P: FnOnce(&mut T) -> bool,
+    {
+        self.as_mut_take_if(predicate)
+    }
+
+    /// stable alias for `as_mut_replace`
+    pub const fn replace(&mut self, value: T) -> BetterOption<T> {
+        self.as_mut_replace(value)
+    }
+
+    /// stable alias for `into_zipped`
+    pub fn zip<U>(self, other: BetterOption<U>) -> BetterOption<(T, U)> {
+        self.into_zipped(other)
+    }
+
+    /// stable alias for `into_zip_with`
+    pub fn zip_with<U, F, R>(self, other: BetterOption<U>, f: F) -> BetterOption<R>
+    where
+        F: FnOnce(T, U) -> R,
+    {
+        self.into_zipped_lazy(other, f)
+    }
+}
+
+// core aliases
+impl<T, U> BetterOption<(T, U)> {
+    /// stable alias for `into_unzipped`
+    pub fn unzip(self) -> (BetterOption<T>, BetterOption<U>) {
+        self.into_unzipped()
+    }
+}
+
+// core aliases
+impl<T> BetterOption<&T> {
+    /// stable alias for `into_copied`
+    pub const fn copied(self) -> BetterOption<T>
+    where
+        T: Copy,
+    {
+        self.into_copied()
+    }
+
+    /// stable alias for `into_cloned`
+    pub fn cloned(self) -> BetterOption<T>
+    where
+        T: Clone,
+    {
+        self.into_cloned()
+    }
+}
+
 impl<T> From<option::Option<T>> for BetterOption<T> {
     fn from(value: option::Option<T>) -> Self {
         match value {
@@ -482,7 +662,7 @@ impl<T> From<option::Option<T>> for BetterOption<T> {
 }
 
 impl<T, U> BetterOption<(T, U)> {
-    pub fn unzip(self) -> (BetterOption<T>, BetterOption<U>) {
+    pub fn into_unzipped(self) -> (BetterOption<T>, BetterOption<U>) {
         match self {
             Some((a, b)) => (Some(a), Some(b)),
             None => (None, None),
@@ -491,7 +671,7 @@ impl<T, U> BetterOption<(T, U)> {
 }
 
 impl<T> BetterOption<&T> {
-    pub const fn copied(self) -> BetterOption<T>
+    pub const fn into_copied(self) -> BetterOption<T>
     where
         T: Copy,
     {
@@ -503,7 +683,7 @@ impl<T> BetterOption<&T> {
         }
     }
 
-    pub fn cloned(self) -> BetterOption<T>
+    pub fn into_cloned(self) -> BetterOption<T>
     where
         T: Clone,
     {
@@ -537,12 +717,20 @@ impl<T> BetterOption<&mut T> {
 }
 
 impl<T, E> BetterOption<BetterResult<T, E>> {
-    pub fn transpose(self) -> BetterResult<BetterOption<T>, E> {
+    pub fn into_result_transposed(self) -> BetterResult<BetterOption<T>, E> {
         match self {
             Some(Ok(x)) => Ok(Some(x)),
             Some(Err(e)) => Err(e),
             None => Ok(None),
         }
+    }
+}
+
+// core aliases
+impl<T, E> BetterOption<BetterResult<T, E>> {
+    /// stable alias for `into_result_transposed`
+    pub fn transpose(self) -> BetterResult<BetterOption<T>, E> {
+        self.into_result_transposed()
     }
 }
 
