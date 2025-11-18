@@ -1,52 +1,226 @@
-use crate::BetterOption;
-use crate::BetterOption::*;
-use BetterResult::*;
-use core::fmt;
-use core::hint;
-use core::ops::{Deref, DerefMut};
-use core::result;
+// ^(\/\/! (?:(unsafe ))?([a-zA-Z_][a-zA-Z0-9_]*) *\((.*)\)(?: +-> +([A-Za-z0-9<,> ]+))?(?: |$).*?)$
+//! ```ignore
+//! BResult<T, E>
+//!
+//! unwrap()                      -> T ?panic
+//! unwrap_or(T)                  -> T ?Drops E
+//! unwrap_or_else(|E| T ?Drops E) -> T
+//! where T: Default
+//! unwrap_or_default()           -> T ?Drops E
+//!
+//! where E = Infallible | !
+//! into_ok_infallible() -> T
+//! where T = Infallible | !
+//! into_err_infallible() -> E
+//!
+//! unwrap_err()                      -> E ?panic
+//! unwrap_err_or(E)                  -> E ?Drops T
+//! unwrap_err_or_else(|T| E ?Drops T) -> E
+//! where E: Default
+//! unwrap_err_or_default()           -> E ?Drops T
+//!
+//! where S: AsRef<str>
+//! expect(S)     -> T ?Drops E + panic
+//! expect_err(S) -> E ?Drops T + panic
+//!
+//! unsafe unwrap_unchecked()     -> T ?ub
+//! unsafe unwrap_err_unchecked() -> E ?ub
+//!
+//! is_ok()      -> bool
+//! is_not_ok()  -> bool
+//! is_err()     -> bool
+//! is_not_err() -> bool
+//!
+//! is_niche_optimized() -> bool
+//!
+//! into_is_ok_and(|T| bool ?Drops T) -> bool ?Drops E
+//! into_is_ok_or (|E| bool ?Drops E) -> bool ?Drops T
+//!
+//! into_is_err_and(|E| bool ?Drops E) -> bool ?Drops T
+//! into_is_err_or (|T| bool ?Drops T) -> bool ?Drops E
+//!
+//! into_boption    () -> BOption<T> Drops E
+//! into_boption_err() -> BOption<E> Drops T
+//!
+//! unsafe into_boption_unchecked    () -> BOption<T> ?ub
+//! unsafe into_boption_err_unchecked() -> BOption<E> ?ub
+//!
+//! into_option    () -> Option<T> Drops E
+//! into_option_err() -> Option<E> Drops T
+//!
+//! unsafe into_option_unchecked    () -> BOption<T> ?ub
+//! unsafe into_option_err_unchecked() -> BOption<E> ?ub
+//!
+//! as_ref() -> BResult<&T, &E>
+//! as_mut() -> BResult<&mut T, &mut E>
+//!
+//! where T: Clone
+//! into_cloned() -> BResult<T, E>
+//! where T: Copy
+//! into_copied() -> BResult<T, E>
+//!
+//! where E: Clone
+//! into_err_cloned() -> BResult<T, E>
+//! where E: Copy
+//! into_err_copied() -> BResult<T, E>
+//!
+//! for <U>: mapping T or E into U
+//! into_map_ok           (|T| U ?Drops T                ) -> BResult<U, E>
+//! into_map_ok_or        (|T| U ?Drops T, U             ) -> U ?Drops E
+//! into_map_ok_or_else   (|T| U ?Drops T, |E| U ?Drops E) -> U
+//! where U: Default
+//! into_map_ok_or_default(|T| U ?Drops T               ) -> U ?Drops E
+//!
+//! for <F>: mapping T or E into F
+//! into_map_err           (                   |E| -> F ?Drops E) -> BResult<T, F>
+//! into_map_err_or        (F,                 |E| -> F ?Drops E) -> F ?Drops T
+//! into_map_err_or_else   (|T| -> F ?Drops T, |E| -> F ?Drops E) -> F
+//! where F: Default
+//! into_map_err_or_default(                   |E| -> F ?Drops E) -> F ?Drops T
+//!
+//! into_self_inspect    (|&T|) -> BResult<T, E>
+//! into_self_inspect_err(|&E|) -> BResult<T, E>
+//! as_inspect    (|&T|)
+//! as_inspect_err(|&E|)
+//!
+//! for <U>: mapping T into BResult<U, E>
+//! into_map_ok_flatten     (    BResult<U, E>         ) -> BResult<U, E> ?Drops T
+//! into_map_ok_flatten_lazy(|T| BResult<U, E> ?Drops T) -> BResult<U, E>
+//! for <F>: mapping F into BResult<T, F>
+//! into_map_err_flatten     (    BResult<T, F>         ) -> BResult<T, F>
+//! into_map_err_flatten_lazy(|E| BResult<T, F> ?Drops E) -> BResult<T, F>
+//!
+//! into_result(Result<T, E>)
+//! into_ffi_result(FfiResult<T, E>)
+//!
+//! FfiResult<T, E>
+//!
+//! into_result() -> Result<T, E>
+//! into_bresult() -> BResult<T, E>
+//!
+//! where T = BResult<U, E>
+//! into_flattened() -> BResult<U, E>
+//! ```
+use crate::betteroption::BOption;
+use crate::betteroption::BOption::{None, Some};
+use core::convert::Infallible;
+use core::hint::unreachable_unchecked;
+use core::mem::ManuallyDrop;
+use core::mem::size_of;
+use core::result::Result;
 
-#[derive(Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
-pub enum BetterResult<T, E> {
+#[allow(non_snake_case)]
+pub union FfiResultDiscr<T, E> {
+    Ok: ManuallyDrop<T>,
+    Err: ManuallyDrop<E>,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum FfiResultTag {
+    Ok = 0,
+    Err = 1,
+}
+
+#[repr(C)]
+pub struct FfiResult<T, E> {
+    tag: FfiResultTag,
+    discriminant: FfiResultDiscr<T, E>,
+}
+
+impl<T, E> FfiResult<T, E> {
+    pub const fn new_ok(t: T) -> Self {
+        FfiResult {
+            tag: FfiResultTag::Ok,
+            discriminant: FfiResultDiscr { Ok: ManuallyDrop::new(t) },
+        }
+    }
+
+    pub const fn new_err(e: E) -> Self {
+        FfiResult {
+            tag: FfiResultTag::Err,
+            discriminant: FfiResultDiscr { Err: ManuallyDrop::new(e) },
+        }
+    }
+}
+
+impl<T, E> Drop for FfiResult<T, E> {
+    fn drop(&mut self) {
+        match self.tag {
+            FfiResultTag::Ok => {
+                let field = unsafe { &mut self.discriminant.Ok };
+                unsafe { ManuallyDrop::drop(field) };
+            }
+            FfiResultTag::Err => {
+                let field = unsafe { &mut self.discriminant.Err };
+                unsafe { ManuallyDrop::drop(field) };
+            }
+        }
+    }
+}
+
+pub enum BResult<T, E> {
     Ok(T),
     Err(E),
 }
+use BResult::{Err, Ok};
 
-impl<T, E> BetterResult<T, E> {
-    pub fn unwrap(self) -> T
-    where
-        E: fmt::Debug,
-    {
+pub trait IntoBResult<T, E> {
+    fn into_bresult(self) -> BResult<T, E>;
+}
+
+impl<T, E> IntoBResult<T, E> for Result<T, E> {
+    fn into_bresult(self) -> BResult<T, E> {
         match self {
-            Ok(val) => val,
-            Err(e) => unwrap_failed("called `Result::unwrap()` on an `Err` value", &e),
+            Result::Ok(t) => Ok(t),
+            Result::Err(t) => Err(t),
         }
     }
+}
 
-    pub fn unwrap_err(self) -> E
-    where
-        T: fmt::Debug,
-    {
-        match self {
-            Ok(t) => unwrap_failed("called `Result::unwrap()` on an `Err` value", &t),
-            Err(val) => val,
+// TODO: replace with deref coercion in FfiResult::into_bresult when deref coercion is not conditionally const, e.g.
+// when we get stable const traits.
+const fn manually_drop_as_ptr<T>(md: &ManuallyDrop<T>) -> *const T {
+    (&raw const *md).cast::<T>()
+}
+
+impl<T, E> FfiResult<T, E> {
+    pub const fn into_bresult(self) -> BResult<T, E> {
+        let this = ManuallyDrop::new(self);
+        match unsafe { (&raw const (*manually_drop_as_ptr(&this)).tag).read() } {
+            FfiResultTag::Ok => {
+                let field_ptr = unsafe { &raw const (*manually_drop_as_ptr(&this)).discriminant.Ok };
+                let field = unsafe { field_ptr.cast::<T>().read() };
+                Ok(field)
+            }
+            FfiResultTag::Err => {
+                let field_ptr = unsafe { &raw const (*manually_drop_as_ptr(&this)).discriminant.Err };
+                let field = unsafe { field_ptr.cast::<E>().read() };
+                Err(field)
+            }
         }
     }
+}
 
-    pub fn unwrap_or(self, default: T) -> T {
+impl<T, E> BResult<T, E> {
+    pub fn unwrap(self) -> T {
         match self {
             Ok(t) => t,
-            Err(_) => default,
+            Err(_) => unwrap_ok_failed_default(),
         }
     }
 
-    pub fn unwrap_or_lazy<F>(self, default_fn: F) -> T
-    where
-        F: FnOnce(E) -> T,
-    {
+    pub fn unwrap_or(self, default_eager: T) -> T {
         match self {
             Ok(t) => t,
-            Err(e) => default_fn(e),
+            Err(_) => default_eager,
+        }
+    }
+
+    pub fn unwrap_or_else(self, default_lazy: impl FnOnce(E) -> T) -> T {
+        match self {
+            Ok(t) => t,
+            Err(e) => default_lazy(e),
         }
     }
 
@@ -55,605 +229,437 @@ impl<T, E> BetterResult<T, E> {
         T: Default,
     {
         match self {
-            Ok(x) => x,
-            Err(_) => Default::default(),
+            Ok(t) => t,
+            Err(_) => T::default(),
         }
     }
 
-    pub fn expect(self, msg: &str) -> T
+    pub fn unwrap_err(self) -> E {
+        match self {
+            Ok(_) => unwrap_err_failed_default(),
+            Err(e) => e,
+        }
+    }
+
+    pub fn unwrap_err_or(self, default_eager: E) -> E {
+        match self {
+            Ok(_) => default_eager,
+            Err(e) => e,
+        }
+    }
+
+    pub fn unwrap_err_or_else(self, default_lazy: impl FnOnce(T) -> E) -> E {
+        match self {
+            Ok(t) => default_lazy(t),
+            Err(e) => e,
+        }
+    }
+
+    pub fn unwrap_err_or_default(self) -> E
     where
-        E: fmt::Debug,
+        E: Default,
     {
+        match self {
+            Ok(_) => E::default(),
+            Err(e) => e,
+        }
+    }
+
+    pub fn expect<S: AsRef<str>>(self, message: S) -> T {
         match self {
             Ok(t) => t,
-            Err(e) => unwrap_failed(msg, &e),
+            Err(_) => unwrap_failed(<S as AsRef<str>>::as_ref(&message)),
         }
     }
 
-    pub fn expect_err(self, msg: &str) -> E
-    where
-        T: fmt::Debug,
-    {
+    pub fn expect_err<S: AsRef<str>>(self, message: S) -> E {
         match self {
-            Ok(e) => unwrap_failed(msg, &e),
-            Err(t) => t,
+            Ok(_) => unwrap_failed(<S as AsRef<str>>::as_ref(&message)),
+            Err(e) => e,
         }
     }
 
     pub unsafe fn unwrap_unchecked(self) -> T {
         match self {
             Ok(t) => t,
-            // SAFETY: the safety contract must be upheld by the caller.
-            Err(_) => unsafe { hint::unreachable_unchecked() },
+            Err(_) => unsafe { unreachable_unchecked() },
         }
     }
 
     pub unsafe fn unwrap_err_unchecked(self) -> E {
         match self {
-            // SAFETY: the safety contract must be upheld by the caller.
-            Ok(_) => unsafe { hint::unreachable_unchecked() },
+            Ok(_) => unsafe { unreachable_unchecked() },
             Err(e) => e,
         }
     }
 
     pub const fn is_ok(&self) -> bool {
-        matches!(*self, Ok(_))
+        match *self {
+            Ok(_) => true,
+            Err(_) => false,
+        }
     }
 
     pub const fn is_not_ok(&self) -> bool {
-        !self.is_ok()
+        match *self {
+            Ok(_) => false,
+            Err(_) => true,
+        }
     }
 
     pub const fn is_err(&self) -> bool {
-        !self.is_ok()
+        match *self {
+            Ok(_) => false,
+            Err(_) => true,
+        }
     }
 
     pub const fn is_not_err(&self) -> bool {
-        self.is_ok()
-    }
-
-    pub fn into_is_ok_and<F>(self, map: F) -> bool
-    where
-        F: FnOnce(T) -> bool,
-    {
-        match self {
-            Ok(x) => map(x),
+        match *self {
+            Ok(_) => true,
             Err(_) => false,
         }
     }
 
-    pub fn into_is_ok_or<F>(self, map_err: F) -> bool
-    where
-        F: FnOnce(E) -> bool,
-    {
-        match self {
-            Ok(_) => true,
-            Err(x) => map_err(x),
-        }
+    pub const fn niche_optimized() -> bool {
+        size_of::<FfiResult<T, E>>() != size_of::<Self>()
     }
 
-    pub fn into_is_ok_nand<F>(self, map: F) -> bool
-    where
-        F: FnOnce(T) -> bool,
-    {
-        match self {
-            Ok(val) => !map(val),
-            Err(_) => true,
-        }
+    pub const fn is_niche_optimized(&self) -> bool {
+        size_of::<FfiResult<T, E>>() != size_of::<Self>()
     }
 
-    pub fn into_is_ok_nor<F>(self, map_err: F) -> bool
-    where
-        F: FnOnce(E) -> bool,
-    {
+    pub fn into_is_ok_and(self, cond: impl FnOnce(T) -> bool) -> bool {
         match self {
-            Ok(_) => false,
-            Err(x) => !map_err(x),
-        }
-    }
-
-    pub fn into_is_ok_xor<F, G>(self, map: F, map_err: G) -> bool
-    where
-        F: FnOnce(T) -> bool,
-        G: FnOnce(E) -> bool,
-    {
-        match self {
-            Ok(val) => !map(val),
-            Err(x) => map_err(x),
-        }
-    }
-
-    pub fn into_is_ok_xnor<F, G>(self, map: F, map_err: G) -> bool
-    where
-        F: FnOnce(T) -> bool,
-        G: FnOnce(E) -> bool,
-    {
-        match self {
-            Ok(val) => map(val),
-            Err(x) => !map_err(x),
-        }
-    }
-
-    pub fn into_is_err_and<F>(self, map_err: F) -> bool
-    where
-        F: FnOnce(E) -> bool,
-    {
-        match self {
-            Ok(_) => false,
-            Err(x) => map_err(x),
-        }
-    }
-
-    pub fn into_is_err_or<F>(self, map: F) -> bool
-    where
-        F: FnOnce(T) -> bool,
-    {
-        match self {
-            Ok(x) => map(x),
-            Err(_) => true,
-        }
-    }
-
-    pub fn into_is_err_nand<F>(self, map: F) -> bool
-    where
-        F: FnOnce(E) -> bool,
-    {
-        match self {
-            Err(val) => !map(val),
-            Ok(_) => true,
-        }
-    }
-
-    pub fn into_is_err_nor<F>(self, map: F) -> bool
-    where
-        F: FnOnce(T) -> bool,
-    {
-        match self {
-            Ok(x) => !map(x),
+            Ok(t) => cond(t),
             Err(_) => false,
         }
     }
 
-    pub fn into_is_err_xor<G, F>(self, map: F, map_err: G) -> bool
-    where
-        F: FnOnce(T) -> bool,
-        G: FnOnce(E) -> bool,
-    {
+    pub fn into_is_ok_or(self, cond: impl FnOnce(E) -> bool) -> bool {
         match self {
-            Ok(x) => map(x),
-            Err(val) => !map_err(val),
+            Ok(_) => true,
+            Err(e) => cond(e),
         }
     }
 
-    pub fn into_is_err_xnor<G, F>(self, map: F, map_err: G) -> bool
-    where
-        F: FnOnce(T) -> bool,
-        G: FnOnce(E) -> bool,
-    {
+    pub fn into_is_err_and(self, cond: impl FnOnce(E) -> bool) -> bool {
         match self {
-            Ok(x) => !map(x),
-            Err(val) => map_err(val),
+            Ok(_) => false,
+            Err(e) => cond(e),
         }
     }
 
-    pub fn into_option(self) -> BetterOption<T> {
+    pub fn into_is_err_or(self, cond: impl FnOnce(T) -> bool) -> bool {
         match self {
-            Ok(x) => Some(x),
+            Ok(t) => cond(t),
+            Err(_) => true,
+        }
+    }
+
+    pub fn into_boption(self) -> BOption<T> {
+        match self {
+            Ok(t) => Some(t),
             Err(_) => None,
         }
     }
 
-    pub fn into_option_err(self) -> BetterOption<E> {
+    pub fn into_boption_err(self) -> BOption<E> {
         match self {
             Ok(_) => None,
-            Err(x) => Some(x),
+            Err(e) => Some(e),
         }
     }
 
-    pub const fn as_ref(&self) -> BetterResult<&T, &E> {
-        match *self {
-            Ok(ref x) => Ok(x),
-            Err(ref x) => Err(x),
-        }
-    }
-
-    pub const fn as_mut(&mut self) -> BetterResult<&mut T, &mut E> {
-        match *self {
-            Ok(ref mut x) => Ok(x),
-            Err(ref mut x) => Err(x),
-        }
-    }
-
-    pub fn into_mapped<U, F>(self, map: F) -> BetterResult<U, E>
-    where
-        F: FnOnce(T) -> U,
-    {
+    pub unsafe fn into_boption_unchecked(self) -> BOption<T> {
         match self {
-            Ok(t) => Ok(map(t)),
+            Ok(t) => Some(t),
+            Err(_) => unsafe { unreachable_unchecked() },
+        }
+    }
+
+    pub unsafe fn into_boption_err_unchecked(self) -> BOption<E> {
+        match self {
+            Ok(_) => unsafe { unreachable_unchecked() },
+            Err(e) => Some(e),
+        }
+    }
+
+    pub fn into_option(self) -> Option<T> {
+        match self {
+            Ok(t) => Option::Some(t),
+            Err(_) => Option::None,
+        }
+    }
+
+    pub fn into_option_err(self) -> Option<E> {
+        match self {
+            Ok(_) => Option::None,
+            Err(e) => Option::Some(e),
+        }
+    }
+
+    pub unsafe fn into_option_unchecked(self) -> Option<T> {
+        match self {
+            Ok(t) => Option::Some(t),
+            Err(_) => unsafe { unreachable_unchecked() },
+        }
+    }
+
+    pub unsafe fn into_option_err_unchecked(self) -> Option<E> {
+        match self {
+            Ok(_) => unsafe { unreachable_unchecked() },
+            Err(e) => Option::Some(e),
+        }
+    }
+
+    pub const fn as_ref(&self) -> BResult<&T, &E> {
+        match *self {
+            Ok(ref t) => Ok(t),
+            Err(ref e) => Err(e),
+        }
+    }
+
+    pub const fn as_mut(&mut self) -> BResult<&mut T, &mut E> {
+        match *self {
+            Ok(ref mut t) => Ok(t),
+            Err(ref mut e) => Err(e),
+        }
+    }
+
+    pub fn into_map_ok<U>(self, mapper: impl FnOnce(T) -> U) -> BResult<U, E> {
+        match self {
+            Ok(t) => Ok(mapper(t)),
             Err(e) => Err(e),
         }
     }
 
-    pub fn into_mapped_or<U, F>(self, default: U, map: F) -> U
-    where
-        F: FnOnce(T) -> U,
-    {
+    pub fn into_map_ok_or<U>(self, mapper: impl FnOnce(T) -> U, default_if_err: U) -> U {
         match self {
-            Ok(t) => map(t),
-            Err(_) => default,
+            Ok(t) => mapper(t),
+            Err(_) => default_if_err,
         }
     }
 
-    pub fn into_mapped_or_lazy<U, D, F>(self, default_fn: D, map: F) -> U
-    where
-        D: FnOnce(E) -> U,
-        F: FnOnce(T) -> U,
-    {
+    pub fn into_map_ok_or_else<U>(self, mapper_t: impl FnOnce(T) -> U, mapper_e: impl FnOnce(E) -> U) -> U {
         match self {
-            Ok(t) => map(t),
-            Err(e) => default_fn(e),
+            Ok(t) => mapper_t(t),
+            Err(e) => mapper_e(e),
         }
     }
 
-    pub fn into_mapped_or_default<F, U>(self, map: F) -> U
+    pub fn into_map_ok_or_default<U>(self, mapper: impl FnOnce(T) -> U) -> U
     where
-        F: FnOnce(T) -> U,
         U: Default,
     {
         match self {
-            Ok(t) => map(t),
-            Err(_) => Default::default(),
+            Ok(t) => mapper(t),
+            Err(_) => U::default(),
         }
     }
 
-    pub fn into_mapped_err<F, O>(self, map_err: O) -> BetterResult<T, F>
-    where
-        O: FnOnce(E) -> F,
-    {
+    pub fn into_map_err<F>(self, mapper_err: impl FnOnce(E) -> F) -> BResult<T, F> {
         match self {
             Ok(t) => Ok(t),
-            Err(e) => Err(map_err(e)),
+            Err(e) => Err(mapper_err(e)),
         }
     }
 
-    pub fn into_mapped_err_or<F, O>(self, default: BetterResult<T, F>, map_err: O) -> BetterResult<T, F>
-    where
-        O: FnOnce(E) -> F,
-    {
+    pub fn into_map_err_or<F>(self, default_if_ok: F, mapper_err: impl FnOnce(E) -> F) -> F {
         match self {
-            Ok(_) => default,
-            Err(e) => Err(map_err(e)),
+            Ok(_) => default_if_ok,
+            Err(e) => mapper_err(e),
         }
     }
 
-    pub fn into_self_inspect<F>(self, inspect: F) -> Self
-    where
-        F: FnOnce(&T),
-    {
-        if let Ok(ref t) = self {
-            inspect(t);
+    pub fn into_map_err_or_else<F>(self, mapper_ok: impl FnOnce(T) -> F, mapper_err: impl FnOnce(E) -> F) -> F {
+        match self {
+            Ok(t) => mapper_ok(t),
+            Err(e) => mapper_err(e),
         }
+    }
 
+    pub fn into_map_err_or_default<F: Default>(self, mapper_err: impl FnOnce(E) -> F) -> F {
+        match self {
+            Ok(_) => F::default(),
+            Err(e) => mapper_err(e),
+        }
+    }
+
+    pub fn into_self_inspect_ok(self, inspector: impl FnOnce(&T)) -> BResult<T, E> {
+        match self {
+            Ok(ref t) => inspector(t),
+            Err(_) => {}
+        }
         self
     }
 
-    pub fn into_self_inspect_err<F>(self, inspect: F) -> Self
-    where
-        F: FnOnce(&E),
-    {
-        if let Err(ref e) = self {
-            inspect(e);
+    pub fn into_self_inspect_err(self, inspector_err: impl FnOnce(&E)) -> BResult<T, E> {
+        match self {
+            Ok(_) => {}
+            Err(ref e) => inspector_err(e),
         }
-
         self
     }
 
-    pub fn as_self_inspect<F>(&self, inspect: F)
-    where
-        F: FnOnce(&T),
-    {
-        if let Ok(t) = self {
-            inspect(t);
+    pub fn as_inspect_ok(&self, inspector: impl FnOnce(&T)) {
+        match *self {
+            Ok(ref t) => inspector(t),
+            Err(_) => {}
         }
     }
 
-    pub fn as_self_inspect_err<F>(&self, inspect: F)
-    where
-        F: FnOnce(&E),
-    {
-        if let Err(e) = self {
-            inspect(e);
+    pub fn as_inspect_err(&self, inspector_err: impl FnOnce(&E)) {
+        match *self {
+            Ok(_) => {}
+            Err(ref e) => inspector_err(e),
         }
     }
 
-    pub fn as_deref(&self) -> BetterResult<&T::Target, &E>
-    where
-        T: Deref,
-    {
-        self.as_ref().into_mapped(|t| t.deref())
-    }
-
-    pub fn as_deref_mut(&mut self) -> BetterResult<&mut T::Target, &mut E>
-    where
-        T: DerefMut,
-    {
-        self.as_mut().into_mapped(|t| t.deref_mut())
-    }
-
-    // todo: iter methods
-
-    pub fn into_ok_of_arg<U>(self, arg: BetterResult<U, E>) -> BetterResult<U, E> {
+    pub fn into_map_ok_flatten<U>(self, other_if_ok: BResult<U, E>) -> BResult<U, E> {
         match self {
-            Ok(_) => arg,
+            Ok(_) => other_if_ok,
             Err(e) => Err(e),
         }
     }
 
-    pub fn into_ok_of_arg_lazy<U, F>(self, arg_fn: F) -> BetterResult<U, E>
-    where
-        F: FnOnce(T) -> BetterResult<U, E>,
-    {
+    pub fn into_map_ok_flatten_lazy<U>(self, other_if_ok_lazy: impl FnOnce(T) -> BResult<U, E>) -> BResult<U, E> {
         match self {
-            Ok(t) => arg_fn(t),
+            Ok(t) => other_if_ok_lazy(t),
             Err(e) => Err(e),
         }
     }
-    pub fn into_err_of_arg<F>(self, arg: BetterResult<T, F>) -> BetterResult<T, F> {
+
+    pub fn into_map_err_flatten<F>(self, other_if_err: BResult<T, F>) -> BResult<T, F> {
         match self {
             Ok(t) => Ok(t),
-            Err(_) => arg,
+            Err(_) => other_if_err,
         }
     }
 
-    pub fn into_err_of_arg_lazy<F, G>(self, arg_fn: G) -> BetterResult<T, F>
+    pub fn into_map_err_flatten_lazy<F>(self, other_if_err_lazy: impl FnOnce(E) -> BResult<T, F>) -> BResult<T, F> {
+        match self {
+            Ok(t) => Ok(t),
+            Err(e) => other_if_err_lazy(e),
+        }
+    }
+
+    pub const fn into_result(self) -> Result<T, E> {
+        let this = ManuallyDrop::new(self);
+        match *unsafe { &*manually_drop_as_ptr(&this) } {
+            Ok(_) => Result::Ok(unsafe { manually_drop_as_ptr(&this).cast::<T>().read() }),
+            Err(_) => Result::Err(unsafe { manually_drop_as_ptr(&this).cast::<E>().read() }),
+        }
+    }
+
+    pub const fn into_ffi_result(self) -> FfiResult<T, E> {
+        let this = ManuallyDrop::new(self);
+        let tag = match *unsafe { &*manually_drop_as_ptr(&this) } {
+            Ok(_) => FfiResultTag::Ok,
+            Err(_) => FfiResultTag::Err,
+        };
+        let discriminant = match *unsafe { &*manually_drop_as_ptr(&this) } {
+            Ok(_) => FfiResultDiscr {
+                Ok: ManuallyDrop::new(unsafe { manually_drop_as_ptr(&this).cast::<T>().read() }),
+            },
+            Err(_) => FfiResultDiscr {
+                Err: ManuallyDrop::new(unsafe { manually_drop_as_ptr(&this).cast::<E>().read() }),
+            },
+        };
+        FfiResult { tag, discriminant }
+    }
+}
+
+impl<T, E> BResult<&T, E> {
+    pub fn into_cloned(self) -> BResult<T, E>
     where
-        G: FnOnce(E) -> BetterResult<T, F>,
+        T: Clone,
+    {
+        match self {
+            Ok(t) => Ok(t.clone()),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn into_copied(self) -> BResult<T, E>
+    where
+        T: Copy,
+    {
+        match self {
+            Ok(t) => Ok(*t),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+impl<T, E> BResult<&mut T, E> {
+    pub fn into_cloned(self) -> BResult<T, E>
+    where
+        T: Clone,
+    {
+        match self {
+            Ok(t) => Ok(t.clone()),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn into_copied(self) -> BResult<T, E>
+    where
+        T: Copy,
+    {
+        match self {
+            Ok(t) => Ok(*t),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+impl<T, E> BResult<T, &E> {
+    pub fn into_err_cloned(self) -> BResult<T, E>
+    where
+        E: Clone,
     {
         match self {
             Ok(t) => Ok(t),
-            Err(e) => arg_fn(e),
+            Err(e) => Err(e.clone()),
         }
     }
 
-    pub fn into_core_result(self) -> result::Result<T, E> {
-        match self {
-            Ok(t) => result::Result::Ok(t),
-            Err(e) => result::Result::Err(e),
-        }
-    }
-}
-
-// core aliases
-#[cfg(feature = "aliases")]
-impl<T, E> BetterResult<T, E> {
-    /// stable alias for `unwrap_or_lazy`
-    pub fn unwrap_or_else<F>(self, default_fn: F) -> T
+    pub fn into_err_copied(self) -> BResult<T, E>
     where
-        F: FnOnce(E) -> T,
-    {
-        self.unwrap_or_lazy(default_fn)
-    }
-
-    /// stable alias for `into_is_ok_and`
-    pub fn is_ok_and<F>(self, map: F) -> bool
-    where
-        F: FnOnce(T) -> bool,
-    {
-        self.into_is_ok_and(map)
-    }
-
-    /// stable alias for `into_is_err_and`
-    pub fn is_err_and<F>(self, map_err: F) -> bool
-    where
-        F: FnOnce(E) -> bool,
-    {
-        self.into_is_err_and(map_err)
-    }
-
-    /// stable alias for `into_option`
-    pub fn ok(self) -> BetterOption<T> {
-        self.into_option()
-    }
-
-    /// stable alias for `into_option_err`
-    pub fn err(self) -> BetterOption<E> {
-        self.into_option_err()
-    }
-
-    /// stable alias for `into_mapped`
-    pub fn map<U, F>(self, map: F) -> BetterResult<U, E>
-    where
-        F: FnOnce(T) -> U,
-    {
-        self.into_mapped(map)
-    }
-
-    /// stable alias for `into_mapped_or`
-    pub fn map_or<U, F>(self, default: U, map: F) -> U
-    where
-        F: FnOnce(T) -> U,
-    {
-        self.into_mapped_or(default, map)
-    }
-
-    /// stable alias for `into_mapped_or_lazy`
-    pub fn map_or_else<U, D, F>(self, default_fn: D, map: F) -> U
-    where
-        D: FnOnce(E) -> U,
-        F: FnOnce(T) -> U,
-    {
-        self.into_mapped_or_lazy(default_fn, map)
-    }
-
-    /// stable alias for `into_mapped_err`
-    pub fn map_err<F, O>(self, map_err: O) -> BetterResult<T, F>
-    where
-        O: FnOnce(E) -> F,
-    {
-        self.into_mapped_err(map_err)
-    }
-
-    /// stable alias for `into_self_inspect`
-    pub fn inspect<F>(self, inspect: F) -> Self
-    where
-        F: FnOnce(&T),
-    {
-        self.into_self_inspect(inspect)
-    }
-
-    /// stable alias for `into_self_inspect_err`
-    pub fn inspect_err<F>(self, inspect: F) -> Self
-    where
-        F: FnOnce(&E),
-    {
-        self.into_self_inspect_err(inspect)
-    }
-
-    /// stable alias for `into_arg_if_ok`
-    pub fn and<U>(self, arg: BetterResult<U, E>) -> BetterResult<U, E> {
-        self.into_ok_of_arg(arg)
-    }
-
-    /// stable alias for `into_arg_if_ok_lazy`
-    pub fn and_then<U, F>(self, arg_fn: F) -> BetterResult<U, E>
-    where
-        F: FnOnce(T) -> BetterResult<U, E>,
-    {
-        self.into_ok_of_arg_lazy(arg_fn)
-    }
-
-    /// stable alias for `into_err_of_arg`
-    pub fn or<F>(self, arg: BetterResult<T, F>) -> BetterResult<T, F> {
-        self.into_err_of_arg(arg)
-    }
-
-    /// stable alias for `into_err_of_arg_lazy`
-    pub fn or_else<F, O>(self, arg_fn: O) -> BetterResult<T, F>
-    where
-        O: FnOnce(E) -> BetterResult<T, F>,
-    {
-        self.into_err_of_arg_lazy(arg_fn)
-    }
-}
-
-impl<T, E> From<result::Result<T, E>> for BetterResult<T, E> {
-    fn from(value: result::Result<T, E>) -> Self {
-        match value {
-            result::Result::Ok(t) => Ok(t),
-            result::Result::Err(e) => Err(e),
-        }
-    }
-}
-
-impl<T, E> From<BetterResult<T, E>> for result::Result<T, E> {
-    fn from(value: BetterResult<T, E>) -> Self {
-        match value {
-            Ok(t) => result::Result::Ok(t),
-            Err(e) => result::Result::Err(e),
-        }
-    }
-}
-
-impl<T, E> BetterResult<&T, E> {
-    pub fn into_copied(self) -> BetterResult<T, E>
-    where
-        T: Copy,
+        E: Copy,
     {
         match self {
-            Ok(&v) => Ok(v),
-            Err(e) => Err(e),
+            Ok(t) => Ok(t),
+            Err(e) => Err(*e),
         }
     }
-
-    pub fn into_cloned(self) -> BetterResult<T, E>
-    where
-        T: Clone,
-    {
-        self.into_mapped(|t| t.clone())
-    }
 }
 
-// core aliases
-#[cfg(feature = "aliases")]
-impl<T, E> BetterResult<&T, E> {
-    /// stable alias for `into_copied`
-    pub fn copied(self) -> BetterResult<T, E>
+impl<T, E> BResult<T, &mut E> {
+    pub fn into_err_cloned(self) -> BResult<T, E>
     where
-        T: Copy,
-    {
-        self.into_copied()
-    }
-
-    /// stable alias for `into_cloned`
-    pub fn cloned(self) -> BetterResult<T, E>
-    where
-        T: Clone,
-    {
-        self.into_cloned()
-    }
-}
-
-impl<T, E> BetterResult<&mut T, E> {
-    pub fn into_copied(self) -> BetterResult<T, E>
-    where
-        T: Copy,
+        E: Clone,
     {
         match self {
-            Ok(&mut v) => Ok(v),
-            Err(e) => Err(e),
+            Ok(t) => Ok(t),
+            Err(e) => Err(e.clone()),
         }
     }
 
-    pub fn into_cloned(self) -> BetterResult<T, E>
+    pub fn into_err_copied(self) -> BResult<T, E>
     where
-        T: Clone,
+        E: Copy,
     {
-        self.into_mapped(|t| t.clone())
-    }
-}
-
-#[cfg(feature = "aliases")]
-// core aliases
-impl<T, E> BetterResult<&mut T, E> {
-    /// stable alias for `into_copied`
-    pub fn copied(self) -> BetterResult<T, E>
-    where
-        T: Copy,
-    {
-        self.into_copied()
-    }
-
-    /// stable alias for `into_cloned`
-    pub fn cloned(self) -> BetterResult<T, E>
-    where
-        T: Clone,
-    {
-        self.into_cloned()
-    }
-}
-
-impl<T, E> BetterResult<BetterOption<T>, E> {
-    pub fn into_option_transposed(self) -> BetterOption<BetterResult<T, E>> {
         match self {
-            Ok(Some(x)) => Some(Ok(x)),
-            Ok(None) => None,
-            Err(e) => Some(Err(e)),
+            Ok(t) => Ok(t),
+            Err(e) => Err(*e),
         }
     }
 }
 
-#[cfg(feature = "aliases")]
-// core aliases
-impl<T, E> BetterResult<BetterOption<T>, E> {
-    /// stable alias for `into_option_transposed`
-    pub fn transposed(self) -> BetterOption<BetterResult<T, E>> {
-        self.into_option_transposed()
-    }
-}
-
-impl<T, E> BetterResult<BetterResult<T, E>, E> {
-    pub fn into_flattened(self) -> BetterResult<T, E> {
-        // FIXME(const-hack): could be written with `and_then`
+impl<T, E> BResult<BResult<T, E>, E> {
+    pub fn into_flattened(self) -> BResult<T, E> {
         match self {
             Ok(inner) => inner,
             Err(e) => Err(e),
@@ -661,44 +667,34 @@ impl<T, E> BetterResult<BetterResult<T, E>, E> {
     }
 }
 
-#[cfg(feature = "aliases")]
-// core aliases
-impl<T, E> BetterResult<BetterResult<T, E>, E> {
-    /// stable alias for `into_flattened`
-    pub fn flattened(self) -> BetterResult<T, E> {
-        self.into_flattened()
+impl<T> BResult<T, Infallible> {
+    pub fn into_ok_infallible(self) -> T {
+        let Ok(t) = self;
+        t
     }
 }
 
-// This is a separate function to reduce the code size of the methods
-#[inline(never)]
-#[cold]
+impl<E> BResult<Infallible, E> {
+    pub fn into_err_infallible(self) -> E {
+        let Err(e) = self;
+        e
+    }
+}
+
 #[track_caller]
-fn unwrap_failed(msg: &str, error: &dyn fmt::Debug) -> ! {
-    panic!("{msg}: {error:?}")
+#[inline(always)]
+fn unwrap_ok_failed_default() -> ! {
+    unwrap_failed("called unwrap on Err value")
 }
 
-impl<T, E> Clone for BetterResult<T, E>
-where
-    T: Clone,
-    E: Clone,
-{
-    #[inline]
-    fn clone(&self) -> Self {
-        match self {
-            Ok(x) => Ok(x.clone()),
-            Err(x) => Err(x.clone()),
-        }
-    }
-
-    #[inline]
-    fn clone_from(&mut self, source: &Self) {
-        match (self, source) {
-            (Ok(to), Ok(from)) => to.clone_from(from),
-            (Err(to), Err(from)) => to.clone_from(from),
-            (to, from) => *to = from.clone(),
-        }
-    }
+#[track_caller]
+#[inline(always)]
+fn unwrap_err_failed_default() -> ! {
+    unwrap_failed("called unwrap_err on Ok value")
 }
 
-// todo: intoiter implementation
+#[track_caller]
+#[inline(never)]
+fn unwrap_failed(message: &str) -> ! {
+    panic!("unwrap failed: {}", message);
+}
